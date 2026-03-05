@@ -8,6 +8,7 @@ import {
 
 const STORAGE_USER_KEY = "dash.currentUserId";
 const GRID_COLUMN_COUNT = 12;
+const LIVE_UPDATE_DEFAULT_INTERVAL_MS = 15000;
 
 const CHART_WIDGETS = [
     {
@@ -30,6 +31,34 @@ const CHART_WIDGETS = [
         subtitle: "Comparativo do periodo",
         chartHostId: "chart-orders-status",
         defaultLayout: { x: 0, y: 4, w: 12, h: 4 }
+    },
+    {
+        id: "widget-cumulative-revenue",
+        title: "Receita Acumulada",
+        subtitle: "Soma progressiva no periodo",
+        chartHostId: "chart-cumulative-revenue",
+        defaultLayout: { x: 0, y: 8, w: 6, h: 4 }
+    },
+    {
+        id: "widget-monthly-growth",
+        title: "Crescimento Mensal",
+        subtitle: "Variacao percentual mes a mes",
+        chartHostId: "chart-monthly-growth",
+        defaultLayout: { x: 6, y: 8, w: 6, h: 4 }
+    },
+    {
+        id: "widget-category-ranking",
+        title: "Ranking de Categorias",
+        subtitle: "Categorias por faturamento",
+        chartHostId: "chart-category-ranking",
+        defaultLayout: { x: 0, y: 12, w: 6, h: 4 }
+    },
+    {
+        id: "widget-status-share",
+        title: "Participacao por Status",
+        subtitle: "Percentual dos pedidos",
+        chartHostId: "chart-status-share",
+        defaultLayout: { x: 6, y: 12, w: 6, h: 4 }
     }
 ];
 
@@ -37,10 +66,25 @@ const WIDGET_DEFINITION_BY_ID = new Map(
     CHART_WIDGETS.map(widget => [widget.id, widget])
 );
 
-const DEFAULT_LAYOUT = CHART_WIDGETS.map(widget => ({
-    id: widget.id,
-    ...widget.defaultLayout
-}));
+const DEFAULT_LAYOUT_IDS = [
+    "widget-monthly-revenue",
+    "widget-category-revenue",
+    "widget-orders-status"
+];
+
+const DEFAULT_LAYOUT = DEFAULT_LAYOUT_IDS
+    .map(id => {
+        const definition = WIDGET_DEFINITION_BY_ID.get(id);
+        if (!definition) {
+            return null;
+        }
+
+        return {
+            id,
+            ...definition.defaultLayout
+        };
+    })
+    .filter(Boolean);
 
 const state = {
     currentUserId: null,
@@ -49,7 +93,14 @@ const state = {
     activeOwnLayoutId: null,
     charts: {},
     dashboardData: null,
-    activeWidgetIds: new Set(DEFAULT_LAYOUT.map(node => node.id))
+    activeWidgetIds: new Set(DEFAULT_LAYOUT.map(node => node.id)),
+    liveUpdate: {
+        enabled: true,
+        intervalMs: LIVE_UPDATE_DEFAULT_INTERVAL_MS,
+        timerId: null,
+        isFetching: false,
+        lastSuccessAt: null
+    }
 };
 
 const elements = {
@@ -62,10 +113,12 @@ const elements = {
     applySharedButton: document.getElementById("applySharedButton"),
     resetLayoutButton: document.getElementById("resetLayoutButton"),
     dashboardMessage: document.getElementById("dashboardMessage"),
-    manageWidgetsButton: document.getElementById("manageWidgetsButton"),
     widgetCatalogModal: document.getElementById("widgetCatalogModal"),
     widgetCatalogList: document.getElementById("widgetCatalogList"),
-    applyWidgetCatalogButton: document.getElementById("applyWidgetCatalogButton")
+    applyWidgetCatalogButton: document.getElementById("applyWidgetCatalogButton"),
+    liveUpdateToggle: document.getElementById("liveUpdateToggle"),
+    liveUpdateIntervalSelect: document.getElementById("liveUpdateIntervalSelect"),
+    liveUpdateStatus: document.getElementById("liveUpdateStatus")
 };
 
 let grid;
@@ -207,11 +260,47 @@ function bindEvents() {
         setVisibleWidgets(selectedWidgetIds);
         widgetCatalogModal?.hide();
     });
+
+    elements.liveUpdateToggle?.addEventListener("change", () => {
+        const enabled = Boolean(elements.liveUpdateToggle.checked);
+        setLiveUpdateEnabled(enabled, { notify: true, immediateRefresh: enabled });
+    });
+
+    elements.liveUpdateIntervalSelect?.addEventListener("change", () => {
+        state.liveUpdate.intervalMs = readLiveUpdateIntervalMs();
+        if (state.liveUpdate.enabled) {
+            startLiveUpdateTimer();
+        }
+
+        updateLiveUpdateStatus(buildLiveUpdateStatusText());
+    });
+
+    document.addEventListener("visibilitychange", () => {
+        if (!state.liveUpdate.enabled) {
+            return;
+        }
+
+        if (document.hidden) {
+            stopLiveUpdateTimer();
+            updateLiveUpdateStatus("Atualizacao pausada (aba inativa).");
+            return;
+        }
+
+        startLiveUpdateTimer();
+        void refreshDashboardData({ silentErrors: true });
+    });
+
+    initializeLiveUpdateControls();
 }
 
 async function bootstrap() {
     await loadUsers();
-    await Promise.all([loadLayouts(), loadAndRenderCharts()]);
+    await loadLayouts();
+    await loadAndRenderCharts({ silentErrors: false });
+
+    if (state.liveUpdate.enabled) {
+        startLiveUpdateTimer();
+    }
 }
 
 async function loadUsers() {
@@ -564,9 +653,45 @@ function getLayoutName() {
     return selected?.name ?? "Meu Layout";
 }
 
-async function loadAndRenderCharts() {
-    state.dashboardData = await getDashboardData();
-    renderVisibleCharts();
+async function loadAndRenderCharts(options = {}) {
+    await refreshDashboardData({
+        silentErrors: options.silentErrors ?? false,
+        forceStatus: true
+    });
+}
+
+async function refreshDashboardData(options = {}) {
+    const silentErrors = options.silentErrors ?? true;
+    const forceStatus = options.forceStatus ?? false;
+
+    if (state.liveUpdate.isFetching) {
+        return false;
+    }
+
+    state.liveUpdate.isFetching = true;
+
+    if (state.liveUpdate.enabled || forceStatus) {
+        updateLiveUpdateStatus("Atualizando dados...");
+    }
+
+    try {
+        state.dashboardData = await getDashboardData();
+        state.liveUpdate.lastSuccessAt = new Date();
+
+        renderVisibleCharts();
+        updateLiveUpdateStatus(buildLiveUpdateStatusText());
+        return true;
+    } catch (error) {
+        updateLiveUpdateStatus("Falha na atualizacao. Nova tentativa no proximo ciclo.");
+
+        if (!silentErrors) {
+            showMessage(resolveErrorMessage(error), "danger");
+        }
+
+        return false;
+    } finally {
+        state.liveUpdate.isFetching = false;
+    }
 }
 
 function renderVisibleCharts() {
@@ -594,13 +719,25 @@ function renderWidgetChart(widgetId) {
         case "widget-orders-status":
             renderOrdersByStatusChart(state.dashboardData.ordersByStatus ?? {});
             break;
+        case "widget-cumulative-revenue":
+            renderCumulativeRevenueChart(state.dashboardData.monthlyRevenue ?? {});
+            break;
+        case "widget-monthly-growth":
+            renderMonthlyGrowthChart(state.dashboardData.monthlyRevenue ?? {});
+            break;
+        case "widget-category-ranking":
+            renderCategoryRankingChart(state.dashboardData.revenueByCategory ?? {});
+            break;
+        case "widget-status-share":
+            renderStatusShareChart(state.dashboardData.ordersByStatus ?? {});
+            break;
         default:
             break;
     }
 }
 
 function renderMonthlyRevenueChart(dataset) {
-    const values = (dataset.values ?? []).map(Number);
+    const values = toNumericValues(dataset.values);
     const options = {
         chart: {
             type: "area",
@@ -645,7 +782,7 @@ function renderRevenueByCategoryChart(dataset) {
             height: "100%"
         },
         labels: dataset.labels ?? [],
-        series: (dataset.values ?? []).map(Number),
+        series: toNumericValues(dataset.values),
         colors: ["#0f5e9c", "#2f9e44", "#d97706", "#3b82f6", "#b45309", "#64748b"],
         legend: {
             position: "bottom"
@@ -676,7 +813,7 @@ function renderOrdersByStatusChart(dataset) {
         },
         colors: ["#1f6ea9"],
         dataLabels: { enabled: false },
-        series: [{ name: "Pedidos", data: (dataset.values ?? []).map(Number) }],
+        series: [{ name: "Pedidos", data: toNumericValues(dataset.values) }],
         xaxis: {
             categories: labels
         },
@@ -686,6 +823,186 @@ function renderOrdersByStatusChart(dataset) {
     };
 
     renderChart("widget-orders-status", "#chart-orders-status", options);
+}
+
+function renderCumulativeRevenueChart(dataset) {
+    const labels = dataset.labels ?? [];
+    const monthlyValues = toNumericValues(dataset.values);
+    const cumulativeValues = [];
+
+    let runningTotal = 0;
+    for (const value of monthlyValues) {
+        runningTotal += value;
+        cumulativeValues.push(runningTotal);
+    }
+
+    const options = {
+        chart: {
+            type: "line",
+            height: "100%",
+            toolbar: { show: false }
+        },
+        series: [{ name: "Acumulado", data: cumulativeValues }],
+        colors: ["#1f7a54"],
+        stroke: { curve: "smooth", width: 3 },
+        markers: { size: 4 },
+        xaxis: {
+            categories: labels
+        },
+        yaxis: {
+            labels: {
+                formatter: value => formatCurrency(value)
+            }
+        },
+        tooltip: {
+            y: {
+                formatter: value => formatCurrency(value)
+            }
+        }
+    };
+
+    renderChart("widget-cumulative-revenue", "#chart-cumulative-revenue", options);
+}
+
+function renderMonthlyGrowthChart(dataset) {
+    const labels = dataset.labels ?? [];
+    const values = toNumericValues(dataset.values);
+    const growthValues = values.map((value, index) => {
+        if (index === 0) {
+            return 0;
+        }
+
+        const previous = values[index - 1];
+        if (previous <= 0) {
+            return 0;
+        }
+
+        return round(((value - previous) / previous) * 100, 1);
+    });
+
+    const options = {
+        chart: {
+            type: "bar",
+            height: "100%",
+            toolbar: { show: false }
+        },
+        series: [{ name: "Variacao", data: growthValues }],
+        plotOptions: {
+            bar: {
+                borderRadius: 5,
+                columnWidth: "55%",
+                colors: {
+                    ranges: [
+                        { from: -100000, to: -0.001, color: "#b42318" },
+                        { from: 0, to: 100000, color: "#15803d" }
+                    ]
+                }
+            }
+        },
+        dataLabels: {
+            enabled: true,
+            formatter: value => formatPercentage(value, 1)
+        },
+        xaxis: {
+            categories: labels
+        },
+        yaxis: {
+            labels: {
+                formatter: value => formatPercentage(value, 0)
+            }
+        },
+        tooltip: {
+            y: {
+                formatter: value => formatPercentage(value, 1)
+            }
+        }
+    };
+
+    renderChart("widget-monthly-growth", "#chart-monthly-growth", options);
+}
+
+function renderCategoryRankingChart(dataset) {
+    const labels = dataset.labels ?? [];
+    const values = toNumericValues(dataset.values);
+    const ranking = labels
+        .map((label, index) => ({ label, value: values[index] ?? 0 }))
+        .sort((left, right) => right.value - left.value)
+        .slice(0, 8);
+
+    const options = {
+        chart: {
+            type: "bar",
+            height: "100%",
+            toolbar: { show: false }
+        },
+        series: [{ name: "Receita", data: ranking.map(item => item.value) }],
+        colors: ["#0f5e9c"],
+        plotOptions: {
+            bar: {
+                horizontal: true,
+                borderRadius: 5,
+                barHeight: "65%"
+            }
+        },
+        dataLabels: {
+            enabled: false
+        },
+        xaxis: {
+            categories: ranking.map(item => item.label),
+            labels: {
+                formatter: value => formatCurrency(value)
+            }
+        },
+        tooltip: {
+            y: {
+                formatter: value => formatCurrency(value)
+            }
+        }
+    };
+
+    renderChart("widget-category-ranking", "#chart-category-ranking", options);
+}
+
+function renderStatusShareChart(dataset) {
+    const labels = (dataset.labels ?? []).map(label => translateStatus(label));
+    const values = toNumericValues(dataset.values);
+    const percentages = toPercentages(values);
+
+    const options = {
+        chart: {
+            type: "radialBar",
+            height: "100%"
+        },
+        series: percentages,
+        labels,
+        colors: ["#0f5e9c", "#2f9e44", "#d97706", "#8b5cf6", "#64748b"],
+        plotOptions: {
+            radialBar: {
+                track: {
+                    background: "#e4ebf5"
+                },
+                dataLabels: {
+                    name: {
+                        fontSize: "12px"
+                    },
+                    value: {
+                        formatter: value => formatPercentage(value, 1)
+                    }
+                }
+            }
+        },
+        legend: {
+            show: true,
+            position: "bottom"
+        },
+        tooltip: {
+            y: {
+                formatter: value => formatPercentage(value, 1)
+            }
+        }
+    };
+
+    renderChart("widget-status-share", "#chart-status-share", options);
 }
 
 function renderChart(key, containerSelector, options) {
@@ -717,6 +1034,129 @@ function destroyChart(key) {
     } finally {
         delete state.charts[key];
     }
+}
+
+function initializeLiveUpdateControls() {
+    state.liveUpdate.intervalMs = readLiveUpdateIntervalMs();
+
+    if (elements.liveUpdateIntervalSelect) {
+        elements.liveUpdateIntervalSelect.value = String(state.liveUpdate.intervalMs);
+    }
+
+    if (elements.liveUpdateToggle) {
+        elements.liveUpdateToggle.checked = state.liveUpdate.enabled;
+    }
+
+    updateLiveUpdateStatus("Aguardando atualizacao...");
+}
+
+function setLiveUpdateEnabled(enabled, options = {}) {
+    state.liveUpdate.enabled = Boolean(enabled);
+
+    if (elements.liveUpdateToggle) {
+        elements.liveUpdateToggle.checked = state.liveUpdate.enabled;
+    }
+
+    if (!state.liveUpdate.enabled) {
+        stopLiveUpdateTimer();
+        updateLiveUpdateStatus("Atualizacao automatica pausada.");
+
+        if (options.notify) {
+            showMessage("Atualizacao automatica desativada.", "info");
+        }
+
+        return;
+    }
+
+    startLiveUpdateTimer();
+    updateLiveUpdateStatus(buildLiveUpdateStatusText());
+
+    if (options.notify) {
+        showMessage("Atualizacao automatica ativada.", "info");
+    }
+
+    if (options.immediateRefresh) {
+        void refreshDashboardData({ silentErrors: true, forceStatus: true });
+    }
+}
+
+function readLiveUpdateIntervalMs() {
+    const interval = Number(elements.liveUpdateIntervalSelect?.value);
+    if (!Number.isFinite(interval) || interval <= 0) {
+        return LIVE_UPDATE_DEFAULT_INTERVAL_MS;
+    }
+
+    return interval;
+}
+
+function startLiveUpdateTimer() {
+    stopLiveUpdateTimer();
+
+    if (!state.liveUpdate.enabled) {
+        return;
+    }
+
+    state.liveUpdate.timerId = window.setInterval(() => {
+        void refreshDashboardData({ silentErrors: true });
+    }, state.liveUpdate.intervalMs);
+}
+
+function stopLiveUpdateTimer() {
+    if (state.liveUpdate.timerId !== null) {
+        window.clearInterval(state.liveUpdate.timerId);
+        state.liveUpdate.timerId = null;
+    }
+}
+
+function buildLiveUpdateStatusText() {
+    if (!state.liveUpdate.enabled) {
+        return "Atualizacao automatica pausada.";
+    }
+
+    const intervalText = `${Math.round(state.liveUpdate.intervalMs / 1000)}s`;
+    if (!state.liveUpdate.lastSuccessAt) {
+        return `Atualizacao automatica ligada (intervalo ${intervalText}).`;
+    }
+
+    return `Ultima atualizacao as ${formatTime(state.liveUpdate.lastSuccessAt)} (intervalo ${intervalText}).`;
+}
+
+function updateLiveUpdateStatus(message) {
+    if (!elements.liveUpdateStatus) {
+        return;
+    }
+
+    elements.liveUpdateStatus.textContent = message;
+}
+
+function formatTime(date) {
+    return date.toLocaleTimeString("pt-BR", {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit"
+    });
+}
+
+function toNumericValues(values) {
+    return (values ?? []).map(value => Number(value) || 0);
+}
+
+function toPercentages(values) {
+    const total = values.reduce((sum, value) => sum + value, 0);
+    if (total <= 0) {
+        return values.map(() => 0);
+    }
+
+    return values.map(value => round((value / total) * 100, 1));
+}
+
+function round(value, decimals = 0) {
+    const base = 10 ** decimals;
+    return Math.round((Number(value) || 0) * base) / base;
+}
+
+function formatPercentage(value, fractionDigits = 1) {
+    return `${(Number(value) || 0).toFixed(fractionDigits)}%`;
 }
 
 function translateStatus(status) {
