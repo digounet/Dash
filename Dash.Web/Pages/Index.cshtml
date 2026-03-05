@@ -50,6 +50,27 @@
                     </button>
                 </div>
             </div>
+            <div class="row g-3 align-items-end mt-1">
+                <div class="col-12">
+                    <div class="live-update-panel">
+                        <div class="form-check form-switch mb-0">
+                            <input id="liveUpdateToggle" class="form-check-input" type="checkbox" checked />
+                            <label for="liveUpdateToggle" class="form-check-label">Atualizacao automatica</label>
+                        </div>
+                        <div class="live-update-interval">
+                            <label for="liveUpdateIntervalSelect" class="form-label mb-0">Intervalo</label>
+                            <select id="liveUpdateIntervalSelect" class="form-select form-select-sm">
+                                <option value="5000">5s</option>
+                                <option value="10000">10s</option>
+                                <option value="15000" selected>15s</option>
+                                <option value="30000">30s</option>
+                                <option value="60000">60s</option>
+                            </select>
+                        </div>
+                        <span id="liveUpdateStatus" class="small live-update-status">Aguardando atualizacao...</span>
+                    </div>
+                </div>
+            </div>
             <div id="dashboardMessage" class="alert mt-3 mb-0 d-none" role="alert"></div>
         </div>
     </div>
@@ -58,7 +79,7 @@
 </section>
 
 <div class="modal fade" id="widgetCatalogModal" tabindex="-1" aria-labelledby="widgetCatalogModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
         <div class="modal-content">
             <div class="modal-header">
                 <h2 class="modal-title fs-5" id="widgetCatalogModalLabel">Graficos predefinidos</h2>

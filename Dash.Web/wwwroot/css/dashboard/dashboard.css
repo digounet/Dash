@@ -35,6 +35,41 @@ body {
     border-color: #0b4c7e;
 }
 
+.live-update-panel {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.65rem 0.8rem;
+    border: 1px dashed #afc3db;
+    border-radius: 10px;
+    background-color: rgba(240, 247, 255, 0.75);
+}
+
+.live-update-panel .form-check-label {
+    color: #17314d;
+    font-weight: 600;
+}
+
+.live-update-interval {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.live-update-interval .form-label {
+    font-size: 0.8rem;
+    color: #3c4f66;
+}
+
+.live-update-interval .form-select {
+    min-width: 88px;
+}
+
+.live-update-status {
+    margin-left: auto;
+    color: #43576f;
+}
+
 .grid-stack {
     min-height: 700px;
 }
@@ -81,6 +116,9 @@ body {
     display: flex;
     flex-direction: column;
     gap: 0.65rem;
+    max-height: 340px;
+    overflow-y: auto;
+    padding-right: 0.2rem;
 }
 
 .widget-catalog-item {
@@ -128,5 +166,14 @@ body {
 
     .chart-host {
         min-height: 200px;
+    }
+
+    .live-update-panel {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .live-update-status {
+        margin-left: 0;
     }
 }
