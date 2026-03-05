@@ -9,7 +9,7 @@
         <div class="card-body">
             <div class="row g-3 align-items-end">
                 <div class="col-12 col-md-3">
-                    <label for="userSelect" class="form-label">Usuário</label>
+                    <label for="userSelect" class="form-label">Usuario</label>
                     <select id="userSelect" class="form-select"></select>
                 </div>
                 <div class="col-12 col-md-3">
@@ -23,7 +23,7 @@
                 <div class="col-12 col-md-3">
                     <div class="form-check mb-2">
                         <input id="shareLayoutCheck" type="checkbox" class="form-check-input" />
-                        <label for="shareLayoutCheck" class="form-check-label">Disponibilizar para outros usuários</label>
+                        <label for="shareLayoutCheck" class="form-check-label">Disponibilizar para outros usuarios</label>
                     </div>
                     <button id="saveLayoutButton" type="button" class="btn btn-primary w-100">Salvar layout atual</button>
                 </div>
@@ -33,55 +33,48 @@
                     <label for="sharedLayoutSelect" class="form-label">Layouts compartilhados</label>
                     <select id="sharedLayoutSelect" class="form-select"></select>
                 </div>
-                <div class="col-6 col-md-3">
+                <div class="col-6 col-md-2">
                     <button id="applySharedButton" type="button" class="btn btn-outline-secondary w-100">Aplicar compartilhado</button>
                 </div>
-                <div class="col-6 col-md-3">
-                    <button id="resetLayoutButton" type="button" class="btn btn-outline-dark w-100">Restaurar padrão</button>
+                <div class="col-6 col-md-2">
+                    <button id="resetLayoutButton" type="button" class="btn btn-outline-dark w-100">Restaurar padrao</button>
+                </div>
+                <div class="col-12 col-md-2">
+                    <button
+                        id="manageWidgetsButton"
+                        type="button"
+                        class="btn btn-outline-primary w-100"
+                        data-bs-toggle="modal"
+                        data-bs-target="#widgetCatalogModal">
+                        Gerenciar graficos
+                    </button>
                 </div>
             </div>
             <div id="dashboardMessage" class="alert mt-3 mb-0 d-none" role="alert"></div>
         </div>
     </div>
 
-    <div id="dashboardGrid" class="grid-stack">
-        <div class="grid-stack-item" gs-id="widget-monthly-revenue" gs-x="0" gs-y="0" gs-w="6" gs-h="4">
-            <div class="grid-stack-item-content">
-                <article class="chart-card">
-                    <header class="chart-card-header">
-                        <h2>Receita Mensal</h2>
-                        <p>Últimos seis meses</p>
-                    </header>
-                    <div id="chart-monthly-revenue" class="chart-host"></div>
-                </article>
-            </div>
-        </div>
+    <div id="dashboardGrid" class="grid-stack"></div>
+</section>
 
-        <div class="grid-stack-item" gs-id="widget-category-revenue" gs-x="6" gs-y="0" gs-w="6" gs-h="4">
-            <div class="grid-stack-item-content">
-                <article class="chart-card">
-                    <header class="chart-card-header">
-                        <h2>Receita por Categoria</h2>
-                        <p>Participação no período</p>
-                    </header>
-                    <div id="chart-category-revenue" class="chart-host"></div>
-                </article>
+<div class="modal fade" id="widgetCatalogModal" tabindex="-1" aria-labelledby="widgetCatalogModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title fs-5" id="widgetCatalogModalLabel">Graficos predefinidos</h2>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
             </div>
-        </div>
-
-        <div class="grid-stack-item" gs-id="widget-orders-status" gs-x="0" gs-y="4" gs-w="12" gs-h="4">
-            <div class="grid-stack-item-content">
-                <article class="chart-card">
-                    <header class="chart-card-header">
-                        <h2>Pedidos por Status</h2>
-                        <p>Comparativo do período</p>
-                    </header>
-                    <div id="chart-orders-status" class="chart-host"></div>
-                </article>
+            <div class="modal-body">
+                <p class="text-muted small mb-3">Marque os graficos que devem aparecer no dashboard atual.</p>
+                <div id="widgetCatalogList" class="widget-catalog-list"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button id="applyWidgetCatalogButton" type="button" class="btn btn-primary">Aplicar selecao</button>
             </div>
         </div>
     </div>
-</section>
+</div>
 
 @section Styles {
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/gridstack@10.2.0/dist/gridstack.min.css" />

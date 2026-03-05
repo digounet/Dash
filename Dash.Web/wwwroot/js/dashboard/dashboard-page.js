@@ -8,18 +8,48 @@ import {
 
 const STORAGE_USER_KEY = "dash.currentUserId";
 const GRID_COLUMN_COUNT = 12;
-const DEFAULT_LAYOUT = [
-    { id: "widget-monthly-revenue", x: 0, y: 0, w: 6, h: 4 },
-    { id: "widget-category-revenue", x: 6, y: 0, w: 6, h: 4 },
-    { id: "widget-orders-status", x: 0, y: 4, w: 12, h: 4 }
+
+const CHART_WIDGETS = [
+    {
+        id: "widget-monthly-revenue",
+        title: "Receita Mensal",
+        subtitle: "Ultimos seis meses",
+        chartHostId: "chart-monthly-revenue",
+        defaultLayout: { x: 0, y: 0, w: 6, h: 4 }
+    },
+    {
+        id: "widget-category-revenue",
+        title: "Receita por Categoria",
+        subtitle: "Participacao no periodo",
+        chartHostId: "chart-category-revenue",
+        defaultLayout: { x: 6, y: 0, w: 6, h: 4 }
+    },
+    {
+        id: "widget-orders-status",
+        title: "Pedidos por Status",
+        subtitle: "Comparativo do periodo",
+        chartHostId: "chart-orders-status",
+        defaultLayout: { x: 0, y: 4, w: 12, h: 4 }
+    }
 ];
+
+const WIDGET_DEFINITION_BY_ID = new Map(
+    CHART_WIDGETS.map(widget => [widget.id, widget])
+);
+
+const DEFAULT_LAYOUT = CHART_WIDGETS.map(widget => ({
+    id: widget.id,
+    ...widget.defaultLayout
+}));
 
 const state = {
     currentUserId: null,
     ownLayouts: [],
     sharedLayouts: [],
     activeOwnLayoutId: null,
-    charts: {}
+    charts: {},
+    dashboardData: null,
+    activeWidgetIds: new Set(DEFAULT_LAYOUT.map(node => node.id))
 };
 
 const elements = {
@@ -31,10 +61,15 @@ const elements = {
     saveLayoutButton: document.getElementById("saveLayoutButton"),
     applySharedButton: document.getElementById("applySharedButton"),
     resetLayoutButton: document.getElementById("resetLayoutButton"),
-    dashboardMessage: document.getElementById("dashboardMessage")
+    dashboardMessage: document.getElementById("dashboardMessage"),
+    manageWidgetsButton: document.getElementById("manageWidgetsButton"),
+    widgetCatalogModal: document.getElementById("widgetCatalogModal"),
+    widgetCatalogList: document.getElementById("widgetCatalogList"),
+    applyWidgetCatalogButton: document.getElementById("applyWidgetCatalogButton")
 };
 
 let grid;
+let widgetCatalogModal;
 
 document.addEventListener("DOMContentLoaded", () => {
     initializeGrid();
@@ -55,7 +90,11 @@ function initializeGrid() {
         "#dashboardGrid"
     );
 
-    applyLayout(DEFAULT_LAYOUT);
+    if (elements.widgetCatalogModal && window.bootstrap?.Modal) {
+        widgetCatalogModal = new window.bootstrap.Modal(elements.widgetCatalogModal);
+    }
+
+    applyLayout(DEFAULT_LAYOUT, { fallbackToDefault: true });
 }
 
 function bindEvents() {
@@ -86,13 +125,17 @@ function bindEvents() {
         state.activeOwnLayoutId = selected.id;
         elements.layoutNameInput.value = selected.name;
         elements.shareLayoutCheck.checked = Boolean(selected.isShared);
-        applyLayout(parseLayout(selected.layoutJson));
+
+        const parsedLayout = parseLayout(selected.layoutJson);
+        applyLayout(parsedLayout.nodes, {
+            fallbackToDefault: parsedLayout.fallbackToDefault
+        });
     });
 
     elements.saveLayoutButton.addEventListener("click", async () => {
         try {
             if (!state.currentUserId) {
-                showMessage("Selecione um usuário para salvar o layout.", "warning");
+                showMessage("Selecione um usuario para salvar o layout.", "warning");
                 return;
             }
 
@@ -118,7 +161,7 @@ function bindEvents() {
     elements.applySharedButton.addEventListener("click", async () => {
         try {
             if (!state.currentUserId) {
-                showMessage("Selecione um usuário para aplicar layout compartilhado.", "warning");
+                showMessage("Selecione um usuario para aplicar layout compartilhado.", "warning");
                 return;
             }
 
@@ -135,7 +178,7 @@ function bindEvents() {
 
             state.activeOwnLayoutId = cloned.id;
             await loadLayouts(cloned.id);
-            showMessage("Layout compartilhado aplicado ao usuário atual.", "success");
+            showMessage("Layout compartilhado aplicado ao usuario atual.", "success");
         } catch (error) {
             showMessage(resolveErrorMessage(error), "danger");
         }
@@ -146,8 +189,23 @@ function bindEvents() {
         elements.ownLayoutSelect.value = "";
         elements.layoutNameInput.value = "Meu Layout";
         elements.shareLayoutCheck.checked = false;
-        applyLayout(DEFAULT_LAYOUT);
-        showMessage("Layout restaurado para o padrão visual.", "info");
+        applyLayout(DEFAULT_LAYOUT, { fallbackToDefault: true });
+        showMessage("Layout restaurado para o padrao visual.", "info");
+    });
+
+    elements.widgetCatalogModal?.addEventListener("show.bs.modal", () => {
+        renderWidgetCatalogList();
+    });
+
+    elements.applyWidgetCatalogButton?.addEventListener("click", () => {
+        const selectedWidgetIds = Array.from(
+            elements.widgetCatalogList.querySelectorAll(
+                'input[name="widgetCatalogItem"]:checked'
+            )
+        ).map(input => input.value);
+
+        setVisibleWidgets(selectedWidgetIds);
+        widgetCatalogModal?.hide();
     });
 }
 
@@ -159,7 +217,7 @@ async function bootstrap() {
 async function loadUsers() {
     const users = await getUsers();
     if (!Array.isArray(users) || users.length === 0) {
-        throw new Error("Nenhum usuário disponível para o dashboard.");
+        throw new Error("Nenhum usuario disponivel para o dashboard.");
     }
 
     elements.userSelect.innerHTML = users
@@ -193,7 +251,7 @@ async function loadLayouts(preferredLayoutId = null) {
         elements.ownLayoutSelect.value = "";
         elements.layoutNameInput.value = "Meu Layout";
         elements.shareLayoutCheck.checked = false;
-        applyLayout(DEFAULT_LAYOUT);
+        applyLayout(DEFAULT_LAYOUT, { fallbackToDefault: true });
         return;
     }
 
@@ -206,7 +264,11 @@ async function loadLayouts(preferredLayoutId = null) {
     elements.ownLayoutSelect.value = String(activeLayout.id);
     elements.layoutNameInput.value = activeLayout.name;
     elements.shareLayoutCheck.checked = Boolean(activeLayout.isShared);
-    applyLayout(parseLayout(activeLayout.layoutJson));
+
+    const parsedLayout = parseLayout(activeLayout.layoutJson);
+    applyLayout(parsedLayout.nodes, {
+        fallbackToDefault: parsedLayout.fallbackToDefault
+    });
 }
 
 function renderOwnLayouts() {
@@ -237,10 +299,25 @@ function renderSharedLayouts() {
     elements.sharedLayoutSelect.innerHTML = options.join("");
 }
 
-function applyLayout(layoutNodes) {
-    const normalized = normalizeLayout(layoutNodes);
+function applyLayout(layoutNodes, options = {}) {
+    const normalized = normalizeLayout(layoutNodes, {
+        fallbackToDefault: options.fallbackToDefault ?? true
+    });
+
+    const targetIds = new Set(normalized.map(node => node.id));
+
+    for (const widgetId of Array.from(state.activeWidgetIds)) {
+        if (targetIds.has(widgetId)) {
+            continue;
+        }
+
+        removeWidget(widgetId);
+    }
+
     for (const node of normalized) {
-        const element = document.querySelector(`[gs-id="${node.id}"]`);
+        ensureWidget(node);
+
+        const element = getWidgetElement(node.id);
         if (!element) {
             continue;
         }
@@ -252,37 +329,220 @@ function applyLayout(layoutNodes) {
             h: node.h
         });
     }
+
+    state.activeWidgetIds = targetIds;
+    renderWidgetCatalogList();
+    renderVisibleCharts();
+}
+
+function ensureWidget(node) {
+    if (!WIDGET_DEFINITION_BY_ID.has(node.id)) {
+        return;
+    }
+
+    const existing = getWidgetElement(node.id);
+    if (existing) {
+        return;
+    }
+
+    const definition = WIDGET_DEFINITION_BY_ID.get(node.id);
+    const element = createWidgetElement(definition);
+
+    grid.addWidget(element, {
+        id: node.id,
+        x: node.x,
+        y: node.y,
+        w: node.w,
+        h: node.h
+    });
+}
+
+function removeWidget(widgetId) {
+    destroyChart(widgetId);
+
+    const element = getWidgetElement(widgetId);
+    if (!element) {
+        return;
+    }
+
+    grid.removeWidget(element, true);
+}
+
+function getWidgetElement(widgetId) {
+    return document.querySelector(`[gs-id="${widgetId}"]`);
+}
+
+function createWidgetElement(definition) {
+    const element = document.createElement("div");
+    element.className = "grid-stack-item";
+    element.setAttribute("gs-id", definition.id);
+
+    element.innerHTML = `
+        <div class="grid-stack-item-content">
+            <article class="chart-card">
+                <header class="chart-card-header">
+                    <h2>${definition.title}</h2>
+                    <p>${definition.subtitle}</p>
+                </header>
+                <div id="${definition.chartHostId}" class="chart-host"></div>
+            </article>
+        </div>`;
+
+    return element;
+}
+
+function setVisibleWidgets(widgetIds) {
+    const selectedIds = new Set(
+        widgetIds.filter(widgetId => WIDGET_DEFINITION_BY_ID.has(widgetId))
+    );
+
+    const currentNodes = normalizeLayout(grid.save(false) ?? [], {
+        fallbackToDefault: false
+    });
+    const currentById = new Map(currentNodes.map(node => [node.id, node]));
+
+    const nextNodes = [];
+    let nextY = getNextWidgetY(currentNodes);
+
+    for (const widget of CHART_WIDGETS) {
+        if (!selectedIds.has(widget.id)) {
+            continue;
+        }
+
+        const existing = currentById.get(widget.id);
+        if (existing) {
+            nextNodes.push(existing);
+            continue;
+        }
+
+        const defaultNode = widget.defaultLayout;
+        nextNodes.push({
+            id: widget.id,
+            x: defaultNode.x,
+            y: nextY,
+            w: defaultNode.w,
+            h: defaultNode.h
+        });
+
+        nextY += defaultNode.h;
+    }
+
+    applyLayout(nextNodes, { fallbackToDefault: false });
+
+    showMessage(
+        nextNodes.length === 0
+            ? "Nenhum grafico selecionado para exibicao."
+            : "Graficos atualizados no dashboard.",
+        "info"
+    );
+}
+
+function getNextWidgetY(layoutNodes) {
+    return layoutNodes.reduce((maxY, node) => Math.max(maxY, node.y + node.h), 0);
+}
+
+function renderWidgetCatalogList() {
+    if (!elements.widgetCatalogList) {
+        return;
+    }
+
+    const content = CHART_WIDGETS.map(widget => {
+        const isChecked = state.activeWidgetIds.has(widget.id) ? "checked" : "";
+        const checkboxId = `widget-catalog-${widget.id}`;
+
+        return `
+            <div class="widget-catalog-item">
+                <div class="form-check d-flex align-items-start gap-2 mb-0">
+                    <input
+                        class="form-check-input"
+                        type="checkbox"
+                        name="widgetCatalogItem"
+                        value="${widget.id}"
+                        id="${checkboxId}"
+                        ${isChecked} />
+                    <label class="form-check-label" for="${checkboxId}">
+                        <strong>${widget.title}</strong>
+                        <span>${widget.subtitle}</span>
+                    </label>
+                </div>
+            </div>`;
+    }).join("");
+
+    elements.widgetCatalogList.innerHTML = content;
 }
 
 function serializeCurrentLayout() {
     const nodes = grid.save(false) ?? [];
-    return normalizeLayout(nodes);
+
+    return {
+        version: 2,
+        widgets: normalizeLayout(nodes, { fallbackToDefault: false })
+    };
 }
 
 function parseLayout(layoutJson) {
     try {
         const parsed = JSON.parse(layoutJson);
-        return Array.isArray(parsed) ? parsed : DEFAULT_LAYOUT;
+        if (Array.isArray(parsed)) {
+            return {
+                nodes: parsed,
+                fallbackToDefault: false
+            };
+        }
+
+        if (parsed && typeof parsed === "object" && Array.isArray(parsed.widgets)) {
+            return {
+                nodes: parsed.widgets,
+                fallbackToDefault: false
+            };
+        }
     } catch {
-        return DEFAULT_LAYOUT;
+        // fallback handled below
     }
+
+    return {
+        nodes: cloneDefaultLayout(),
+        fallbackToDefault: true
+    };
 }
 
-function normalizeLayout(layoutNodes) {
+function normalizeLayout(layoutNodes, options = {}) {
+    const fallbackToDefault = options.fallbackToDefault ?? true;
     const source = Array.isArray(layoutNodes) ? layoutNodes : [];
-    const byId = new Map(source.map(node => [node.id, node]));
+    const byId = new Map();
 
-    return DEFAULT_LAYOUT.map(defaultNode => {
-        const node = byId.get(defaultNode.id) ?? defaultNode;
+    for (const node of source) {
+        const id = node?.id;
+        if (!id || byId.has(id)) {
+            continue;
+        }
+
+        const definition = WIDGET_DEFINITION_BY_ID.get(id);
+        if (!definition) {
+            continue;
+        }
+
+        const defaultNode = definition.defaultLayout;
         const width = clamp(toInteger(node.w, defaultNode.w), 2, GRID_COLUMN_COUNT);
-        return {
-            id: defaultNode.id,
-            x: clamp(toInteger(node.x, defaultNode.x), 0, GRID_COLUMN_COUNT - 1),
+
+        byId.set(id, {
+            id,
+            x: clamp(toInteger(node.x, defaultNode.x), 0, Math.max(0, GRID_COLUMN_COUNT - width)),
             y: Math.max(0, toInteger(node.y, defaultNode.y)),
             w: width,
             h: clamp(toInteger(node.h, defaultNode.h), 2, 9)
-        };
-    });
+        });
+    }
+
+    if (byId.size === 0) {
+        return fallbackToDefault ? cloneDefaultLayout() : [];
+    }
+
+    return Array.from(byId.values()).sort((left, right) => left.y - right.y || left.x - right.x);
+}
+
+function cloneDefaultLayout() {
+    return DEFAULT_LAYOUT.map(node => ({ ...node }));
 }
 
 function toInteger(value, fallback) {
@@ -305,10 +565,38 @@ function getLayoutName() {
 }
 
 async function loadAndRenderCharts() {
-    const data = await getDashboardData();
-    renderMonthlyRevenueChart(data.monthlyRevenue);
-    renderRevenueByCategoryChart(data.revenueByCategory);
-    renderOrdersByStatusChart(data.ordersByStatus);
+    state.dashboardData = await getDashboardData();
+    renderVisibleCharts();
+}
+
+function renderVisibleCharts() {
+    if (!state.dashboardData) {
+        return;
+    }
+
+    for (const widgetId of state.activeWidgetIds) {
+        renderWidgetChart(widgetId);
+    }
+}
+
+function renderWidgetChart(widgetId) {
+    if (!state.dashboardData) {
+        return;
+    }
+
+    switch (widgetId) {
+        case "widget-monthly-revenue":
+            renderMonthlyRevenueChart(state.dashboardData.monthlyRevenue ?? {});
+            break;
+        case "widget-category-revenue":
+            renderRevenueByCategoryChart(state.dashboardData.revenueByCategory ?? {});
+            break;
+        case "widget-orders-status":
+            renderOrdersByStatusChart(state.dashboardData.ordersByStatus ?? {});
+            break;
+        default:
+            break;
+    }
 }
 
 function renderMonthlyRevenueChart(dataset) {
@@ -347,7 +635,7 @@ function renderMonthlyRevenueChart(dataset) {
         }
     };
 
-    renderChart("monthlyRevenue", "#chart-monthly-revenue", options);
+    renderChart("widget-monthly-revenue", "#chart-monthly-revenue", options);
 }
 
 function renderRevenueByCategoryChart(dataset) {
@@ -369,7 +657,7 @@ function renderRevenueByCategoryChart(dataset) {
         }
     };
 
-    renderChart("revenueByCategory", "#chart-category-revenue", options);
+    renderChart("widget-category-revenue", "#chart-category-revenue", options);
 }
 
 function renderOrdersByStatusChart(dataset) {
@@ -397,22 +685,38 @@ function renderOrdersByStatusChart(dataset) {
         }
     };
 
-    renderChart("ordersByStatus", "#chart-orders-status", options);
+    renderChart("widget-orders-status", "#chart-orders-status", options);
 }
 
 function renderChart(key, containerSelector, options) {
+    const container = document.querySelector(containerSelector);
+    if (!container) {
+        destroyChart(key);
+        return;
+    }
+
     const chart = state.charts[key];
     if (!chart) {
-        const instance = new window.ApexCharts(
-            document.querySelector(containerSelector),
-            options
-        );
+        const instance = new window.ApexCharts(container, options);
         instance.render();
         state.charts[key] = instance;
         return;
     }
 
     chart.updateOptions(options, false, true);
+}
+
+function destroyChart(key) {
+    const chart = state.charts[key];
+    if (!chart) {
+        return;
+    }
+
+    try {
+        chart.destroy();
+    } finally {
+        delete state.charts[key];
+    }
 }
 
 function translateStatus(status) {
