@@ -1,0 +1,19 @@
+a.navbar-brand {
+    white-space: nowrap;
+}
+
+.border-top {
+    border-top: 1px solid #dde4ef !important;
+}
+
+.border-bottom {
+    border-bottom: 1px solid #dde4ef !important;
+}
+
+.box-shadow {
+    box-shadow: 0 10px 24px rgba(15, 30, 45, 0.08);
+}
+
+.footer {
+    white-space: nowrap;
+}

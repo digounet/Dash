@@ -1,0 +1,33 @@
+html {
+    font-size: 15px;
+}
+
+@media (min-width: 768px) {
+    html {
+        font-size: 16px;
+    }
+}
+
+body {
+    margin: 0;
+    min-height: 100vh;
+    color: #1f2937;
+}
+
+.navbar-brand {
+    letter-spacing: 0.01em;
+}
+
+.footer {
+    padding: 1rem 0;
+    margin-top: 2rem;
+}
+
+.btn:focus,
+.btn:active:focus,
+.btn-link.nav-link:focus,
+.form-control:focus,
+.form-check-input:focus,
+.form-select:focus {
+    box-shadow: 0 0 0 0.2rem rgba(15, 94, 156, 0.18);
+}

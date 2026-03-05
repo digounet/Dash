@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="Dash.Application/Dash.Application.csproj" />
+  <Project Path="Dash.Domain/Dash.Domain.csproj" />
+  <Project Path="Dash.Infrastructure/Dash.Infrastructure.csproj" />
+  <Project Path="Dash.Web/Dash.Web.csproj" />
+</Solution>
