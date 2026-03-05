@@ -9,6 +9,80 @@ import {
 const STORAGE_USER_KEY = "dash.currentUserId";
 const GRID_COLUMN_COUNT = 12;
 const LIVE_UPDATE_DEFAULT_INTERVAL_MS = 15000;
+const CHART_THEME_STORAGE_PREFIX = "dash.chartTheme.user.";
+const DEFAULT_CHART_THEME_ID = "ocean";
+
+const LEGACY_WIDGET_ID_ALIAS = new Map([
+    ["monthly-revenue", "widget-monthly-revenue"],
+    ["category-revenue", "widget-category-revenue"],
+    ["orders-status", "widget-orders-status"],
+    ["cumulative-revenue", "widget-cumulative-revenue"],
+    ["monthly-growth", "widget-monthly-growth"],
+    ["category-ranking", "widget-category-ranking"],
+    ["status-share", "widget-status-share"],
+    ["chart-monthly-revenue", "widget-monthly-revenue"],
+    ["chart-category-revenue", "widget-category-revenue"],
+    ["chart-orders-status", "widget-orders-status"],
+    ["chart-cumulative-revenue", "widget-cumulative-revenue"],
+    ["chart-monthly-growth", "widget-monthly-growth"],
+    ["chart-category-ranking", "widget-category-ranking"],
+    ["chart-status-share", "widget-status-share"]
+]);
+
+const CHART_THEMES = {
+    ocean: {
+        name: "Oceano",
+        primary: "#0f5e9c",
+        secondary: "#1f7a54",
+        bar: "#1f6ea9",
+        positive: "#15803d",
+        negative: "#b42318",
+        axisText: "#415168",
+        labelText: "#17314d",
+        track: "#e4ebf5",
+        categorical: ["#0f5e9c", "#2f9e44", "#d97706", "#3b82f6", "#b45309", "#64748b"],
+        radial: ["#0f5e9c", "#2f9e44", "#d97706", "#8b5cf6", "#64748b"]
+    },
+    forest: {
+        name: "Floresta",
+        primary: "#1f7a54",
+        secondary: "#2f9e44",
+        bar: "#247157",
+        positive: "#15803d",
+        negative: "#be123c",
+        axisText: "#355244",
+        labelText: "#18372b",
+        track: "#dce9e2",
+        categorical: ["#1f7a54", "#2f9e44", "#4d7c0f", "#0f766e", "#84cc16", "#64748b"],
+        radial: ["#1f7a54", "#2f9e44", "#65a30d", "#0f766e", "#64748b"]
+    },
+    sunset: {
+        name: "Entardecer",
+        primary: "#b45309",
+        secondary: "#c2410c",
+        bar: "#c05621",
+        positive: "#ca8a04",
+        negative: "#b91c1c",
+        axisText: "#6b3f1a",
+        labelText: "#51290f",
+        track: "#f2dfce",
+        categorical: ["#b45309", "#c2410c", "#d97706", "#ea580c", "#0284c7", "#7c3aed"],
+        radial: ["#b45309", "#c2410c", "#d97706", "#0284c7", "#7c3aed"]
+    },
+    mono: {
+        name: "Monocromatico",
+        primary: "#1f2937",
+        secondary: "#334155",
+        bar: "#334155",
+        positive: "#0f766e",
+        negative: "#b91c1c",
+        axisText: "#334155",
+        labelText: "#111827",
+        track: "#e5e7eb",
+        categorical: ["#1f2937", "#334155", "#475569", "#64748b", "#0f766e", "#9f1239"],
+        radial: ["#1f2937", "#334155", "#475569", "#0f766e", "#9f1239"]
+    }
+};
 
 const CHART_WIDGETS = [
     {
@@ -88,6 +162,7 @@ const DEFAULT_LAYOUT = DEFAULT_LAYOUT_IDS
 
 const state = {
     currentUserId: null,
+    chartThemeId: DEFAULT_CHART_THEME_ID,
     ownLayouts: [],
     sharedLayouts: [],
     activeOwnLayoutId: null,
@@ -118,7 +193,8 @@ const elements = {
     applyWidgetCatalogButton: document.getElementById("applyWidgetCatalogButton"),
     liveUpdateToggle: document.getElementById("liveUpdateToggle"),
     liveUpdateIntervalSelect: document.getElementById("liveUpdateIntervalSelect"),
-    liveUpdateStatus: document.getElementById("liveUpdateStatus")
+    liveUpdateStatus: document.getElementById("liveUpdateStatus"),
+    chartThemeSelect: document.getElementById("chartThemeSelect")
 };
 
 let grid;
@@ -155,7 +231,9 @@ function bindEvents() {
         try {
             state.currentUserId = Number(event.target.value);
             localStorage.setItem(STORAGE_USER_KEY, String(state.currentUserId));
+            loadChartThemeForCurrentUser();
             await loadLayouts();
+            renderVisibleCharts();
         } catch (error) {
             showMessage(resolveErrorMessage(error), "danger");
         }
@@ -275,6 +353,17 @@ function bindEvents() {
         updateLiveUpdateStatus(buildLiveUpdateStatusText());
     });
 
+    elements.chartThemeSelect?.addEventListener("change", event => {
+        const nextThemeId = resolveChartThemeId(event.target.value);
+        if (nextThemeId === state.chartThemeId) {
+            return;
+        }
+
+        state.chartThemeId = nextThemeId;
+        persistChartThemeForCurrentUser();
+        renderVisibleCharts();
+    });
+
     document.addEventListener("visibilitychange", () => {
         if (!state.liveUpdate.enabled) {
             return;
@@ -291,10 +380,12 @@ function bindEvents() {
     });
 
     initializeLiveUpdateControls();
+    initializeChartThemeControl();
 }
 
 async function bootstrap() {
     await loadUsers();
+    loadChartThemeForCurrentUser();
     await loadLayouts();
     await loadAndRenderCharts({ silentErrors: false });
 
@@ -344,8 +435,17 @@ async function loadLayouts(preferredLayoutId = null) {
         return;
     }
 
-    const activeLayout = state.ownLayouts.find(layout => layout.id === activeLayoutId);
+    const activeLayout =
+        state.ownLayouts.find(layout => layout.id === activeLayoutId) ??
+        state.ownLayouts[0] ??
+        null;
+
     if (!activeLayout) {
+        state.activeOwnLayoutId = null;
+        elements.ownLayoutSelect.value = "";
+        elements.layoutNameInput.value = "Meu Layout";
+        elements.shareLayoutCheck.checked = false;
+        applyLayout(DEFAULT_LAYOUT, { fallbackToDefault: true });
         return;
     }
 
@@ -572,16 +672,10 @@ function serializeCurrentLayout() {
 function parseLayout(layoutJson) {
     try {
         const parsed = JSON.parse(layoutJson);
-        if (Array.isArray(parsed)) {
+        const nodes = extractLayoutNodes(parsed);
+        if (Array.isArray(nodes)) {
             return {
-                nodes: parsed,
-                fallbackToDefault: false
-            };
-        }
-
-        if (parsed && typeof parsed === "object" && Array.isArray(parsed.widgets)) {
-            return {
-                nodes: parsed.widgets,
+                nodes,
                 fallbackToDefault: false
             };
         }
@@ -601,7 +695,7 @@ function normalizeLayout(layoutNodes, options = {}) {
     const byId = new Map();
 
     for (const node of source) {
-        const id = node?.id;
+        const id = resolveWidgetId(node);
         if (!id || byId.has(id)) {
             continue;
         }
@@ -624,10 +718,71 @@ function normalizeLayout(layoutNodes, options = {}) {
     }
 
     if (byId.size === 0) {
+        if (source.length > 0) {
+            return cloneDefaultLayout();
+        }
+
         return fallbackToDefault ? cloneDefaultLayout() : [];
     }
 
     return Array.from(byId.values()).sort((left, right) => left.y - right.y || left.x - right.x);
+}
+
+function extractLayoutNodes(layoutPayload) {
+    if (Array.isArray(layoutPayload)) {
+        return layoutPayload;
+    }
+
+    if (!layoutPayload || typeof layoutPayload !== "object") {
+        return null;
+    }
+
+    if (Array.isArray(layoutPayload.widgets)) {
+        return layoutPayload.widgets;
+    }
+
+    if (Array.isArray(layoutPayload.nodes)) {
+        return layoutPayload.nodes;
+    }
+
+    if (Array.isArray(layoutPayload.layout)) {
+        return layoutPayload.layout;
+    }
+
+    if (Array.isArray(layoutPayload.items)) {
+        return layoutPayload.items;
+    }
+
+    return null;
+}
+
+function resolveWidgetId(layoutNode) {
+    const rawId =
+        layoutNode?.id ??
+        layoutNode?.widgetId ??
+        layoutNode?.widget ??
+        layoutNode?.chartId ??
+        null;
+
+    if (typeof rawId !== "string") {
+        return null;
+    }
+
+    const trimmed = rawId.trim();
+    if (!trimmed) {
+        return null;
+    }
+
+    if (WIDGET_DEFINITION_BY_ID.has(trimmed)) {
+        return trimmed;
+    }
+
+    const lower = trimmed.toLowerCase();
+    if (WIDGET_DEFINITION_BY_ID.has(lower)) {
+        return lower;
+    }
+
+    return LEGACY_WIDGET_ID_ALIAS.get(trimmed) ?? LEGACY_WIDGET_ID_ALIAS.get(lower) ?? null;
 }
 
 function cloneDefaultLayout() {
@@ -738,13 +893,14 @@ function renderWidgetChart(widgetId) {
 
 function renderMonthlyRevenueChart(dataset) {
     const values = toNumericValues(dataset.values);
+    const theme = getActiveChartTheme();
     const options = {
         chart: {
             type: "area",
             height: "100%",
             toolbar: { show: false }
         },
-        colors: ["#0f5e9c"],
+        colors: [theme.primary],
         stroke: { curve: "smooth", width: 3 },
         fill: {
             type: "gradient",
@@ -757,7 +913,7 @@ function renderMonthlyRevenueChart(dataset) {
         xaxis: {
             categories: dataset.labels ?? [],
             labels: {
-                style: { colors: "#415168" }
+                style: { colors: theme.axisText }
             }
         },
         yaxis: {
@@ -776,6 +932,7 @@ function renderMonthlyRevenueChart(dataset) {
 }
 
 function renderRevenueByCategoryChart(dataset) {
+    const theme = getActiveChartTheme();
     const options = {
         chart: {
             type: "donut",
@@ -783,7 +940,7 @@ function renderRevenueByCategoryChart(dataset) {
         },
         labels: dataset.labels ?? [],
         series: toNumericValues(dataset.values),
-        colors: ["#0f5e9c", "#2f9e44", "#d97706", "#3b82f6", "#b45309", "#64748b"],
+        colors: theme.categorical,
         legend: {
             position: "bottom"
         },
@@ -799,6 +956,7 @@ function renderRevenueByCategoryChart(dataset) {
 
 function renderOrdersByStatusChart(dataset) {
     const labels = (dataset.labels ?? []).map(label => translateStatus(label));
+    const theme = getActiveChartTheme();
     const options = {
         chart: {
             type: "bar",
@@ -808,17 +966,33 @@ function renderOrdersByStatusChart(dataset) {
         plotOptions: {
             bar: {
                 borderRadius: 6,
-                columnWidth: "45%"
+                columnWidth: "45%",
+                dataLabels: {
+                    position: "top"
+                }
             }
         },
-        colors: ["#1f6ea9"],
-        dataLabels: { enabled: false },
+        colors: [theme.bar],
+        dataLabels: {
+            enabled: true,
+            formatter: value => formatInteger(value),
+            offsetY: -12,
+            style: {
+                colors: [theme.labelText]
+            }
+        },
         series: [{ name: "Pedidos", data: toNumericValues(dataset.values) }],
         xaxis: {
-            categories: labels
+            categories: labels,
+            labels: {
+                style: { colors: theme.axisText }
+            }
         },
         yaxis: {
-            forceNiceScale: true
+            forceNiceScale: true,
+            labels: {
+                formatter: value => formatInteger(value)
+            }
         }
     };
 
@@ -829,6 +1003,7 @@ function renderCumulativeRevenueChart(dataset) {
     const labels = dataset.labels ?? [];
     const monthlyValues = toNumericValues(dataset.values);
     const cumulativeValues = [];
+    const theme = getActiveChartTheme();
 
     let runningTotal = 0;
     for (const value of monthlyValues) {
@@ -843,11 +1018,14 @@ function renderCumulativeRevenueChart(dataset) {
             toolbar: { show: false }
         },
         series: [{ name: "Acumulado", data: cumulativeValues }],
-        colors: ["#1f7a54"],
+        colors: [theme.secondary],
         stroke: { curve: "smooth", width: 3 },
         markers: { size: 4 },
         xaxis: {
-            categories: labels
+            categories: labels,
+            labels: {
+                style: { colors: theme.axisText }
+            }
         },
         yaxis: {
             labels: {
@@ -867,6 +1045,7 @@ function renderCumulativeRevenueChart(dataset) {
 function renderMonthlyGrowthChart(dataset) {
     const labels = dataset.labels ?? [];
     const values = toNumericValues(dataset.values);
+    const theme = getActiveChartTheme();
     const growthValues = values.map((value, index) => {
         if (index === 0) {
             return 0;
@@ -893,18 +1072,24 @@ function renderMonthlyGrowthChart(dataset) {
                 columnWidth: "55%",
                 colors: {
                     ranges: [
-                        { from: -100000, to: -0.001, color: "#b42318" },
-                        { from: 0, to: 100000, color: "#15803d" }
+                        { from: -100000, to: -0.001, color: theme.negative },
+                        { from: 0, to: 100000, color: theme.positive }
                     ]
                 }
             }
         },
         dataLabels: {
             enabled: true,
-            formatter: value => formatPercentage(value, 1)
+            formatter: value => formatPercentage(value, 1),
+            style: {
+                colors: [theme.labelText]
+            }
         },
         xaxis: {
-            categories: labels
+            categories: labels,
+            labels: {
+                style: { colors: theme.axisText }
+            }
         },
         yaxis: {
             labels: {
@@ -924,6 +1109,7 @@ function renderMonthlyGrowthChart(dataset) {
 function renderCategoryRankingChart(dataset) {
     const labels = dataset.labels ?? [];
     const values = toNumericValues(dataset.values);
+    const theme = getActiveChartTheme();
     const ranking = labels
         .map((label, index) => ({ label, value: values[index] ?? 0 }))
         .sort((left, right) => right.value - left.value)
@@ -936,21 +1122,30 @@ function renderCategoryRankingChart(dataset) {
             toolbar: { show: false }
         },
         series: [{ name: "Receita", data: ranking.map(item => item.value) }],
-        colors: ["#0f5e9c"],
+        colors: [theme.primary],
         plotOptions: {
             bar: {
                 horizontal: true,
                 borderRadius: 5,
-                barHeight: "65%"
+                barHeight: "65%",
+                dataLabels: {
+                    position: "top"
+                }
             }
         },
         dataLabels: {
-            enabled: false
+            enabled: true,
+            formatter: value => formatCompactCurrency(value),
+            offsetX: 8,
+            style: {
+                colors: [theme.labelText]
+            }
         },
         xaxis: {
             categories: ranking.map(item => item.label),
             labels: {
-                formatter: value => formatCurrency(value)
+                formatter: value => formatCurrency(value),
+                style: { colors: theme.axisText }
             }
         },
         tooltip: {
@@ -967,6 +1162,7 @@ function renderStatusShareChart(dataset) {
     const labels = (dataset.labels ?? []).map(label => translateStatus(label));
     const values = toNumericValues(dataset.values);
     const percentages = toPercentages(values);
+    const theme = getActiveChartTheme();
 
     const options = {
         chart: {
@@ -975,11 +1171,11 @@ function renderStatusShareChart(dataset) {
         },
         series: percentages,
         labels,
-        colors: ["#0f5e9c", "#2f9e44", "#d97706", "#8b5cf6", "#64748b"],
+        colors: theme.radial,
         plotOptions: {
             radialBar: {
                 track: {
-                    background: "#e4ebf5"
+                    background: theme.track
                 },
                 dataLabels: {
                     name: {
@@ -1048,6 +1244,57 @@ function initializeLiveUpdateControls() {
     }
 
     updateLiveUpdateStatus("Aguardando atualizacao...");
+}
+
+function initializeChartThemeControl() {
+    if (!elements.chartThemeSelect) {
+        return;
+    }
+
+    if (elements.chartThemeSelect.options.length === 0) {
+        elements.chartThemeSelect.innerHTML = Object.entries(CHART_THEMES)
+            .map(([themeId, theme]) => `<option value="${themeId}">${theme.name}</option>`)
+            .join("");
+    }
+
+    syncChartThemeSelect();
+}
+
+function loadChartThemeForCurrentUser() {
+    const storageKey = getChartThemeStorageKey(state.currentUserId);
+    const storedThemeId = localStorage.getItem(storageKey);
+    state.chartThemeId = resolveChartThemeId(storedThemeId);
+    syncChartThemeSelect();
+}
+
+function persistChartThemeForCurrentUser() {
+    const storageKey = getChartThemeStorageKey(state.currentUserId);
+    localStorage.setItem(storageKey, state.chartThemeId);
+}
+
+function getChartThemeStorageKey(userId) {
+    const parsedUserId = Number(userId) || 0;
+    return `${CHART_THEME_STORAGE_PREFIX}${parsedUserId}`;
+}
+
+function resolveChartThemeId(themeId) {
+    if (typeof themeId === "string" && CHART_THEMES[themeId]) {
+        return themeId;
+    }
+
+    return DEFAULT_CHART_THEME_ID;
+}
+
+function syncChartThemeSelect() {
+    if (!elements.chartThemeSelect) {
+        return;
+    }
+
+    elements.chartThemeSelect.value = state.chartThemeId;
+}
+
+function getActiveChartTheme() {
+    return CHART_THEMES[state.chartThemeId] ?? CHART_THEMES[DEFAULT_CHART_THEME_ID];
 }
 
 function setLiveUpdateEnabled(enabled, options = {}) {
@@ -1159,6 +1406,10 @@ function formatPercentage(value, fractionDigits = 1) {
     return `${(Number(value) || 0).toFixed(fractionDigits)}%`;
 }
 
+function formatInteger(value) {
+    return String(Math.round(Number(value) || 0));
+}
+
 function translateStatus(status) {
     const map = {
         Pending: "Pendente",
@@ -1168,6 +1419,15 @@ function translateStatus(status) {
     };
 
     return map[status] ?? status;
+}
+
+function formatCompactCurrency(value) {
+    return new Intl.NumberFormat("pt-BR", {
+        style: "currency",
+        currency: "BRL",
+        notation: "compact",
+        maximumFractionDigits: 1
+    }).format(Number(value) || 0);
 }
 
 function formatCurrency(value) {

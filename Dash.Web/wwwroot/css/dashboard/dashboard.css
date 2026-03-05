@@ -56,13 +56,25 @@ body {
     gap: 0.5rem;
 }
 
+.chart-theme-picker {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
 .live-update-interval .form-label {
     font-size: 0.8rem;
     color: #3c4f66;
 }
 
-.live-update-interval .form-select {
+.live-update-interval .form-select,
+.chart-theme-picker .form-select {
     min-width: 88px;
+}
+
+.chart-theme-picker .form-label {
+    font-size: 0.8rem;
+    color: #3c4f66;
 }
 
 .live-update-status {
