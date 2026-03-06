@@ -4,131 +4,7 @@
     ViewData["Title"] = "Dashboard";
 }
 
-<section class="dashboard-shell">
-    <div class="card border-0 shadow-sm mb-3">
-        <div class="card-body">
-            <div class="row g-3 align-items-end">
-                <div class="col-12 col-md-3">
-                    <label for="userSelect" class="form-label">Usuario</label>
-                    <select id="userSelect" class="form-select"></select>
-                </div>
-                <div class="col-12 col-md-3">
-                    <label for="ownLayoutSelect" class="form-label">Meus layouts</label>
-                    <select id="ownLayoutSelect" class="form-select"></select>
-                </div>
-                <div class="col-12 col-md-3">
-                    <label for="layoutNameInput" class="form-label">Nome para salvar</label>
-                    <input id="layoutNameInput" type="text" class="form-control" maxlength="120" placeholder="Ex.: Comercial semanal" />
-                </div>
-                <div class="col-12 col-md-3">
-                    <div class="form-check mb-2">
-                        <input id="shareLayoutCheck" type="checkbox" class="form-check-input" />
-                        <label for="shareLayoutCheck" class="form-check-label">Disponibilizar para outros usuarios</label>
-                    </div>
-                    <button id="saveLayoutButton" type="button" class="btn btn-primary w-100">Salvar layout atual</button>
-                </div>
-            </div>
-            <div class="row g-3 align-items-end mt-1">
-                <div class="col-12 col-md-6">
-                    <label for="sharedLayoutSelect" class="form-label">Layouts compartilhados</label>
-                    <select id="sharedLayoutSelect" class="form-select"></select>
-                </div>
-                <div class="col-6 col-md-2">
-                    <button id="applySharedButton" type="button" class="btn btn-outline-secondary w-100">Aplicar compartilhado</button>
-                </div>
-                <div class="col-6 col-md-2">
-                    <button id="resetLayoutButton" type="button" class="btn btn-outline-dark w-100">Restaurar padrao</button>
-                </div>
-                <div class="col-12 col-md-2">
-                    <button
-                        id="manageWidgetsButton"
-                        type="button"
-                        class="btn btn-outline-primary w-100"
-                        data-bs-toggle="modal"
-                        data-bs-target="#widgetCatalogModal">
-                        Gerenciar graficos
-                    </button>
-                </div>
-            </div>
-            <div class="row g-3 align-items-end mt-1">
-                <div class="col-12">
-                    <div class="live-update-panel">
-                        <div class="form-check form-switch mb-0">
-                            <input id="liveUpdateToggle" class="form-check-input" type="checkbox" checked />
-                            <label for="liveUpdateToggle" class="form-check-label">Atualizacao automatica</label>
-                        </div>
-                        <div class="live-update-interval">
-                            <label for="liveUpdateIntervalSelect" class="form-label mb-0">Intervalo</label>
-                            <select id="liveUpdateIntervalSelect" class="form-select form-select-sm">
-                                <option value="5000">5s</option>
-                                <option value="10000">10s</option>
-                                <option value="15000" selected>15s</option>
-                                <option value="30000">30s</option>
-                                <option value="60000">60s</option>
-                            </select>
-                        </div>
-                        <div class="chart-theme-picker">
-                            <label for="chartThemeSelect" class="form-label mb-0">Tema dos graficos</label>
-                            <select id="chartThemeSelect" class="form-select form-select-sm">
-                                <option value="ocean">Oceano</option>
-                                <option value="forest">Floresta</option>
-                                <option value="sunset">Entardecer</option>
-                                <option value="mono">Monocromatico</option>
-                            </select>
-                        </div>
-                        <span id="liveUpdateStatus" class="small live-update-status">Aguardando atualizacao...</span>
-                    </div>
-                </div>
-            </div>
-            <div class="row g-3 align-items-end mt-1">
-                <div class="col-12">
-                    <div class="presentation-panel">
-                        <button id="fullscreenToggleButton" type="button" class="btn btn-outline-dark btn-sm">
-                            Entrar em tela cheia
-                        </button>
-                        <div class="form-check form-switch mb-0">
-                            <input id="slideshowToggle" class="form-check-input" type="checkbox" />
-                            <label for="slideshowToggle" class="form-check-label">Alternar paginas automaticamente</label>
-                        </div>
-                        <div class="slideshow-interval">
-                            <label for="slideshowIntervalSelect" class="form-label mb-0">Troca de pagina</label>
-                            <select id="slideshowIntervalSelect" class="form-select form-select-sm">
-                                <option value="10000">10s</option>
-                                <option value="15000" selected>15s</option>
-                                <option value="30000">30s</option>
-                                <option value="45000">45s</option>
-                                <option value="60000">60s</option>
-                            </select>
-                        </div>
-                        <span id="slideshowStatus" class="small slideshow-status">Apresentacao pausada.</span>
-                    </div>
-                </div>
-            </div>
-            <div id="dashboardMessage" class="alert mt-3 mb-0 d-none" role="alert"></div>
-        </div>
-    </div>
-
-    <div id="dashboardGrid" class="grid-stack"></div>
-</section>
-
-<div class="modal fade" id="widgetCatalogModal" tabindex="-1" aria-labelledby="widgetCatalogModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h2 class="modal-title fs-5" id="widgetCatalogModalLabel">Graficos predefinidos</h2>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
-            </div>
-            <div class="modal-body">
-                <p class="text-muted small mb-3">Marque os graficos que devem aparecer no dashboard atual.</p>
-                <div id="widgetCatalogList" class="widget-catalog-list"></div>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
-                <button id="applyWidgetCatalogButton" type="button" class="btn btn-primary">Aplicar selecao</button>
-            </div>
-        </div>
-    </div>
-</div>
+<div id="reactDashboardRoot"></div>
 
 @section Styles {
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/gridstack@10.2.0/dist/gridstack.min.css" />
@@ -138,5 +14,6 @@
 @section Scripts {
     <script src="https://cdn.jsdelivr.net/npm/gridstack@10.2.0/dist/gridstack-all.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
+    <script type="module" src="~/js/dashboard/dashboard-app.js" asp-append-version="true"></script>
     <script type="module" src="~/js/dashboard/dashboard-page.js" asp-append-version="true"></script>
 }
