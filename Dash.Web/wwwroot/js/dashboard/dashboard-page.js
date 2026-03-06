@@ -1466,7 +1466,10 @@ function setSlideshowEnabled(enabled, options = {}) {
     updateSlideshowStatus(buildSlideshowStatusText());
 
     if (options.notify) {
-        showMessage("Apresentacao automatica ativada.", "info");
+        const message = state.presentation.fullscreen
+            ? "Apresentacao automatica ativada."
+            : "Apresentacao automatica ativada. Entre em tela cheia para iniciar as transicoes.";
+        showMessage(message, "info");
     }
 }
 
@@ -1486,6 +1489,10 @@ function startSlideshowTimer() {
         return;
     }
 
+    if (!state.presentation.fullscreen) {
+        return;
+    }
+
     state.presentation.timerId = window.setInterval(() => {
         advanceSlideshowPage();
     }, state.presentation.intervalMs);
@@ -1499,6 +1506,10 @@ function stopSlideshowTimer() {
 }
 
 function advanceSlideshowPage() {
+    if (!state.presentation.fullscreen) {
+        return;
+    }
+
     if (state.ownLayouts.length <= 1) {
         setSlideshowEnabled(false);
         return;
@@ -1539,6 +1550,10 @@ function buildSlideshowStatusText() {
         return "Apresentacao pausada.";
     }
 
+    if (!state.presentation.fullscreen) {
+        return "Apresentacao ligada. Entre em tela cheia para iniciar as trocas.";
+    }
+
     const totalPages = state.ownLayouts.length;
     const currentIndex = Math.max(0, state.ownLayouts.findIndex(layout => layout.id === state.activeOwnLayoutId));
     const intervalText = `${Math.round(state.presentation.intervalMs / 1000)}s`;
@@ -1566,6 +1581,16 @@ function syncFullscreenStateFromDocument() {
     state.presentation.fullscreen = Boolean(document.fullscreenElement);
     document.body.classList.toggle("dashboard-fullscreen", state.presentation.fullscreen);
     syncFullscreenButtonLabel();
+
+    if (state.presentation.slideshowEnabled) {
+        if (state.presentation.fullscreen) {
+            startSlideshowTimer();
+        } else {
+            stopSlideshowTimer();
+        }
+    }
+
+    updateSlideshowStatus(buildSlideshowStatusText());
 }
 
 function syncFullscreenButtonLabel() {
