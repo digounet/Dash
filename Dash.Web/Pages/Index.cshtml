@@ -80,6 +80,30 @@
                     </div>
                 </div>
             </div>
+            <div class="row g-3 align-items-end mt-1">
+                <div class="col-12">
+                    <div class="presentation-panel">
+                        <button id="fullscreenToggleButton" type="button" class="btn btn-outline-dark btn-sm">
+                            Entrar em tela cheia
+                        </button>
+                        <div class="form-check form-switch mb-0">
+                            <input id="slideshowToggle" class="form-check-input" type="checkbox" />
+                            <label for="slideshowToggle" class="form-check-label">Alternar paginas automaticamente</label>
+                        </div>
+                        <div class="slideshow-interval">
+                            <label for="slideshowIntervalSelect" class="form-label mb-0">Troca de pagina</label>
+                            <select id="slideshowIntervalSelect" class="form-select form-select-sm">
+                                <option value="10000">10s</option>
+                                <option value="15000" selected>15s</option>
+                                <option value="30000">30s</option>
+                                <option value="45000">45s</option>
+                                <option value="60000">60s</option>
+                            </select>
+                        </div>
+                        <span id="slideshowStatus" class="small slideshow-status">Apresentacao pausada.</span>
+                    </div>
+                </div>
+            </div>
             <div id="dashboardMessage" class="alert mt-3 mb-0 d-none" role="alert"></div>
         </div>
     </div>

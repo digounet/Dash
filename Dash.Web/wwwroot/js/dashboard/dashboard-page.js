@@ -9,6 +9,7 @@ import {
 const STORAGE_USER_KEY = "dash.currentUserId";
 const GRID_COLUMN_COUNT = 12;
 const LIVE_UPDATE_DEFAULT_INTERVAL_MS = 15000;
+const SLIDESHOW_DEFAULT_INTERVAL_MS = 15000;
 const CHART_THEME_STORAGE_PREFIX = "dash.chartTheme.user.";
 const DEFAULT_CHART_THEME_ID = "ocean";
 
@@ -175,6 +176,13 @@ const state = {
         timerId: null,
         isFetching: false,
         lastSuccessAt: null
+    },
+    presentation: {
+        fullscreen: false,
+        slideshowEnabled: false,
+        intervalMs: SLIDESHOW_DEFAULT_INTERVAL_MS,
+        timerId: null,
+        currentLayoutIndex: 0
     }
 };
 
@@ -194,7 +202,11 @@ const elements = {
     liveUpdateToggle: document.getElementById("liveUpdateToggle"),
     liveUpdateIntervalSelect: document.getElementById("liveUpdateIntervalSelect"),
     liveUpdateStatus: document.getElementById("liveUpdateStatus"),
-    chartThemeSelect: document.getElementById("chartThemeSelect")
+    chartThemeSelect: document.getElementById("chartThemeSelect"),
+    fullscreenToggleButton: document.getElementById("fullscreenToggleButton"),
+    slideshowToggle: document.getElementById("slideshowToggle"),
+    slideshowIntervalSelect: document.getElementById("slideshowIntervalSelect"),
+    slideshowStatus: document.getElementById("slideshowStatus")
 };
 
 let grid;
@@ -233,6 +245,7 @@ function bindEvents() {
             localStorage.setItem(STORAGE_USER_KEY, String(state.currentUserId));
             loadChartThemeForCurrentUser();
             await loadLayouts();
+            updateSlideshowStatus(buildSlideshowStatusText());
             renderVisibleCharts();
         } catch (error) {
             showMessage(resolveErrorMessage(error), "danger");
@@ -254,6 +267,7 @@ function bindEvents() {
         }
 
         state.activeOwnLayoutId = selected.id;
+        state.presentation.currentLayoutIndex = Math.max(0, state.ownLayouts.findIndex(layout => layout.id === selected.id));
         elements.layoutNameInput.value = selected.name;
         elements.shareLayoutCheck.checked = Boolean(selected.isShared);
 
@@ -261,6 +275,7 @@ function bindEvents() {
         applyLayout(parsedLayout.nodes, {
             fallbackToDefault: parsedLayout.fallbackToDefault
         });
+        updateSlideshowStatus(buildSlideshowStatusText());
     });
 
     elements.saveLayoutButton.addEventListener("click", async () => {
@@ -283,6 +298,7 @@ function bindEvents() {
             const saved = await saveLayout(payload);
             state.activeOwnLayoutId = saved.id;
             await loadLayouts(saved.id);
+            updateSlideshowStatus(buildSlideshowStatusText());
             showMessage("Layout salvo com sucesso.", "success");
         } catch (error) {
             showMessage(resolveErrorMessage(error), "danger");
@@ -309,6 +325,7 @@ function bindEvents() {
 
             state.activeOwnLayoutId = cloned.id;
             await loadLayouts(cloned.id);
+            updateSlideshowStatus(buildSlideshowStatusText());
             showMessage("Layout compartilhado aplicado ao usuario atual.", "success");
         } catch (error) {
             showMessage(resolveErrorMessage(error), "danger");
@@ -321,6 +338,7 @@ function bindEvents() {
         elements.layoutNameInput.value = "Meu Layout";
         elements.shareLayoutCheck.checked = false;
         applyLayout(DEFAULT_LAYOUT, { fallbackToDefault: true });
+        updateSlideshowStatus(buildSlideshowStatusText());
         showMessage("Layout restaurado para o padrao visual.", "info");
     });
 
@@ -379,8 +397,29 @@ function bindEvents() {
         void refreshDashboardData({ silentErrors: true });
     });
 
+    elements.fullscreenToggleButton?.addEventListener("click", () => {
+        void toggleFullscreenMode();
+    });
+
+    elements.slideshowToggle?.addEventListener("change", () => {
+        const enabled = Boolean(elements.slideshowToggle.checked);
+        setSlideshowEnabled(enabled, { notify: true });
+    });
+
+    elements.slideshowIntervalSelect?.addEventListener("change", () => {
+        state.presentation.intervalMs = readSlideshowIntervalMs();
+        if (state.presentation.slideshowEnabled) {
+            startSlideshowTimer();
+        }
+
+        updateSlideshowStatus(buildSlideshowStatusText());
+    });
+
+    document.addEventListener("fullscreenchange", syncFullscreenStateFromDocument);
+
     initializeLiveUpdateControls();
     initializeChartThemeControl();
+    initializePresentationControls();
 }
 
 async function bootstrap() {
@@ -420,6 +459,10 @@ async function loadLayouts(preferredLayoutId = null) {
     renderOwnLayouts();
     renderSharedLayouts();
 
+    if (state.ownLayouts.length <= 1 && state.presentation.slideshowEnabled) {
+        setSlideshowEnabled(false);
+    }
+
     const activeLayoutId =
         preferredLayoutId ??
         catalog.activeLayout?.id ??
@@ -432,6 +475,7 @@ async function loadLayouts(preferredLayoutId = null) {
         elements.layoutNameInput.value = "Meu Layout";
         elements.shareLayoutCheck.checked = false;
         applyLayout(DEFAULT_LAYOUT, { fallbackToDefault: true });
+        updateSlideshowStatus(buildSlideshowStatusText());
         return;
     }
 
@@ -446,6 +490,7 @@ async function loadLayouts(preferredLayoutId = null) {
         elements.layoutNameInput.value = "Meu Layout";
         elements.shareLayoutCheck.checked = false;
         applyLayout(DEFAULT_LAYOUT, { fallbackToDefault: true });
+        updateSlideshowStatus(buildSlideshowStatusText());
         return;
     }
 
@@ -453,11 +498,13 @@ async function loadLayouts(preferredLayoutId = null) {
     elements.ownLayoutSelect.value = String(activeLayout.id);
     elements.layoutNameInput.value = activeLayout.name;
     elements.shareLayoutCheck.checked = Boolean(activeLayout.isShared);
+    state.presentation.currentLayoutIndex = Math.max(0, state.ownLayouts.findIndex(layout => layout.id === activeLayout.id));
 
     const parsedLayout = parseLayout(activeLayout.layoutJson);
     applyLayout(parsedLayout.nodes, {
         fallbackToDefault: parsedLayout.fallbackToDefault
     });
+    updateSlideshowStatus(buildSlideshowStatusText());
 }
 
 function renderOwnLayouts() {
@@ -1246,6 +1293,21 @@ function initializeLiveUpdateControls() {
     updateLiveUpdateStatus("Aguardando atualizacao...");
 }
 
+function initializePresentationControls() {
+    state.presentation.intervalMs = readSlideshowIntervalMs();
+
+    if (elements.slideshowIntervalSelect) {
+        elements.slideshowIntervalSelect.value = String(state.presentation.intervalMs);
+    }
+
+    if (elements.slideshowToggle) {
+        elements.slideshowToggle.checked = state.presentation.slideshowEnabled;
+    }
+
+    syncFullscreenButtonLabel();
+    updateSlideshowStatus(buildSlideshowStatusText());
+}
+
 function initializeChartThemeControl() {
     if (!elements.chartThemeSelect) {
         return;
@@ -1366,6 +1428,154 @@ function buildLiveUpdateStatusText() {
     }
 
     return `Ultima atualizacao as ${formatTime(state.liveUpdate.lastSuccessAt)} (intervalo ${intervalText}).`;
+}
+
+function setSlideshowEnabled(enabled, options = {}) {
+    state.presentation.slideshowEnabled = Boolean(enabled);
+
+    if (elements.slideshowToggle) {
+        elements.slideshowToggle.checked = state.presentation.slideshowEnabled;
+    }
+
+    if (!state.presentation.slideshowEnabled) {
+        stopSlideshowTimer();
+        updateSlideshowStatus("Apresentacao pausada.");
+
+        if (options.notify) {
+            showMessage("Apresentacao automatica desativada.", "info");
+        }
+
+        return;
+    }
+
+    if (state.ownLayouts.length <= 1) {
+        state.presentation.slideshowEnabled = false;
+        if (elements.slideshowToggle) {
+            elements.slideshowToggle.checked = false;
+        }
+
+        updateSlideshowStatus("Crie ao menos duas paginas (layouts) para apresentar.");
+        if (options.notify) {
+            showMessage("Crie ao menos duas paginas para usar a apresentacao.", "warning");
+        }
+
+        return;
+    }
+
+    startSlideshowTimer();
+    updateSlideshowStatus(buildSlideshowStatusText());
+
+    if (options.notify) {
+        showMessage("Apresentacao automatica ativada.", "info");
+    }
+}
+
+function readSlideshowIntervalMs() {
+    const interval = Number(elements.slideshowIntervalSelect?.value);
+    if (!Number.isFinite(interval) || interval <= 0) {
+        return SLIDESHOW_DEFAULT_INTERVAL_MS;
+    }
+
+    return interval;
+}
+
+function startSlideshowTimer() {
+    stopSlideshowTimer();
+
+    if (!state.presentation.slideshowEnabled) {
+        return;
+    }
+
+    state.presentation.timerId = window.setInterval(() => {
+        advanceSlideshowPage();
+    }, state.presentation.intervalMs);
+}
+
+function stopSlideshowTimer() {
+    if (state.presentation.timerId !== null) {
+        window.clearInterval(state.presentation.timerId);
+        state.presentation.timerId = null;
+    }
+}
+
+function advanceSlideshowPage() {
+    if (state.ownLayouts.length <= 1) {
+        setSlideshowEnabled(false);
+        return;
+    }
+
+    const currentIndex = state.ownLayouts.findIndex(layout => layout.id === state.activeOwnLayoutId);
+    const nextIndex = (currentIndex + 1 + state.ownLayouts.length) % state.ownLayouts.length;
+    applyOwnLayoutByIndex(nextIndex);
+    updateSlideshowStatus(buildSlideshowStatusText());
+}
+
+function applyOwnLayoutByIndex(index) {
+    if (!Array.isArray(state.ownLayouts) || state.ownLayouts.length === 0) {
+        return;
+    }
+
+    const safeIndex = ((index % state.ownLayouts.length) + state.ownLayouts.length) % state.ownLayouts.length;
+    const selected = state.ownLayouts[safeIndex];
+    if (!selected) {
+        return;
+    }
+
+    state.presentation.currentLayoutIndex = safeIndex;
+    state.activeOwnLayoutId = selected.id;
+    elements.ownLayoutSelect.value = String(selected.id);
+    elements.layoutNameInput.value = selected.name;
+    elements.shareLayoutCheck.checked = Boolean(selected.isShared);
+
+    const parsedLayout = parseLayout(selected.layoutJson);
+    applyLayout(parsedLayout.nodes, {
+        fallbackToDefault: parsedLayout.fallbackToDefault
+    });
+    updateSlideshowStatus(buildSlideshowStatusText());
+}
+
+function buildSlideshowStatusText() {
+    if (!state.presentation.slideshowEnabled) {
+        return "Apresentacao pausada.";
+    }
+
+    const totalPages = state.ownLayouts.length;
+    const currentIndex = Math.max(0, state.ownLayouts.findIndex(layout => layout.id === state.activeOwnLayoutId));
+    const intervalText = `${Math.round(state.presentation.intervalMs / 1000)}s`;
+    return `Pagina ${currentIndex + 1}/${totalPages} (troca a cada ${intervalText}).`;
+}
+
+function updateSlideshowStatus(message) {
+    if (!elements.slideshowStatus) {
+        return;
+    }
+
+    elements.slideshowStatus.textContent = message;
+}
+
+async function toggleFullscreenMode() {
+    if (!document.fullscreenElement) {
+        await document.documentElement.requestFullscreen();
+        return;
+    }
+
+    await document.exitFullscreen();
+}
+
+function syncFullscreenStateFromDocument() {
+    state.presentation.fullscreen = Boolean(document.fullscreenElement);
+    document.body.classList.toggle("dashboard-fullscreen", state.presentation.fullscreen);
+    syncFullscreenButtonLabel();
+}
+
+function syncFullscreenButtonLabel() {
+    if (!elements.fullscreenToggleButton) {
+        return;
+    }
+
+    elements.fullscreenToggleButton.textContent = state.presentation.fullscreen
+        ? "Sair da tela cheia"
+        : "Entrar em tela cheia";
 }
 
 function updateLiveUpdateStatus(message) {
